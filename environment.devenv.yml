@@ -17,7 +17,7 @@ dependencies:
   - typing-extensions <5.11  # [PY==36]
 
   # develop
-  - black
+  - ruff
   - pre-commit
   - pygments>=2.2.0
   - pytest>=3.8.0
