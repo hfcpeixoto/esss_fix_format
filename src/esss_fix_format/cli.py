@@ -132,6 +132,12 @@ def has_black_config(pyproject_toml: Optional[Path]) -> bool:
     return pyproject_toml.is_file() and "[tool.black]" in pyproject_toml.read_text(encoding="UTF-8")
 
 
+def has_ruff_config(pyproject_toml: Optional[Path]) -> bool:
+    if pyproject_toml is None:
+        return False
+    return pyproject_toml.is_file() and "[tool.ruff]" in pyproject_toml.read_text(encoding="UTF-8")
+
+
 # caches which directories have the `.clang-format` file, *in or above it*, to avoid hitting the
 # disk too many times
 __HAS_DOT_CLANG_FORMAT: Dict[str, bool] = dict()
@@ -384,6 +390,55 @@ def run_black_on_python_files(
     return would_be_formatted, black_failed
 
 
+def run_ruff_on_python_files(
+    files: Sequence[Path], check: bool, exclude_patterns: Sequence[str], verbose: bool
+) -> Tuple[bool, bool]:
+    """
+    Runs ruff on the given files (checking or formatting).
+
+    Ruff's output is shown directly to the user, so even in events of errors it is
+    expected that the users sees the error directly.
+
+    We need this function to work differently than the rest of ``esss_fix_format`` (which processes
+    each file individually) because we want to call ruff only once, reformatting all files
+    given to it in the command-line.
+
+    :return: a pair (would_be_formatted, ruff_failed)
+    """
+    py_files = [x for x in files if should_format(x, ["*.py"], exclude_patterns)[0]]
+    ruff_failed = False
+    would_be_formatted = False
+    if py_files:
+        if check:
+            click.secho(f"Checking ruff on {len(py_files)} files...", fg="cyan")
+        else:
+            click.secho(f"Running ruff on {len(py_files)} files...", fg="cyan")
+        # On Windows there's a limit on the command-line size, so we call black in batches
+        # this should only be an issue when executing fix-format over the entire repository,
+        # not on day-to-day usage.
+        # Once black grows a public API (https://github.com/psf/black/issues/779), we can
+        # ditch running things in a subprocess altogether.
+        if sys.platform.startswith("win"):
+            chunk_size = 100
+            file_iterator = boltons.iterutils.chunked(py_files, chunk_size)
+        else:
+            file_iterator = iter([py_files])
+        for files in file_iterator:
+            args = ["ruff format"]
+            if check:
+                args.append("--check")
+            if verbose:
+                args.append("--verbose")
+            args.extend(str(x) for x in files)
+            status = subprocess.call(args)
+            if not ruff_failed:
+                ruff_failed = not check and status != 0
+            if not would_be_formatted:
+                would_be_formatted = check and status == 1
+
+    return would_be_formatted, ruff_failed
+
+
 def get_git_ignored_files(directory: Path) -> Set[Path]:
     """Return a set() of git-ignored files if ``directory`` is tracked by git."""
     try:
@@ -449,6 +504,17 @@ def _main(
     else:
         exclude_patterns = []
 
+    if has_ruff_config(pyproject_toml) and has_black_config(pyproject_toml):
+        click.secho("pyproject.toml has configurations for both Ruff and Black.", fg="red")
+        click.secho("Only one of these configurations may be set.", fg="red")
+        return 1
+
+    # if has_ruff_config(pyproject_toml):
+    #     would_be_formatted, ruff_failed = run_ruff_on_python_files(
+    #         files, check, exclude_patterns, verbose
+    #     )
+    #     if ruff_failed:
+    #         errors.append("Error formatting ruff (see console)")
     if has_black_config(pyproject_toml):
         would_be_formatted, black_failed = run_black_on_python_files(
             files, check, exclude_patterns, verbose
@@ -456,11 +522,16 @@ def _main(
         if black_failed:
             errors.append("Error formatting black (see console)")
     else:
-        click.secho("pyproject.toml not found or not configured for black.", fg="red")
-        click.secho("Create a pyproject.toml file and add a [tool.black] section.", fg="red")
+        click.secho(
+            "pyproject.toml not found or not configured for neither ruff nor black.", fg="red"
+        )
+        click.secho(
+            "Create a pyproject.toml file and add either a [tool.ruff] or a [tool.black] section.",
+            fg="red",
+        )
         click.secho("Suggestion:", fg="red")
         click.secho("", fg="cyan")
-        click.secho("  [tool.black]", fg="cyan")
+        click.secho("  [tool.ruff]", fg="cyan")
         click.secho("  line-length = 100", fg="cyan")
         return 1
 

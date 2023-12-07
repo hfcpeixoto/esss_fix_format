@@ -53,11 +53,7 @@ def input_file(tmp_path: Path, sort_cfg_to_tmp: None) -> Path:
             foxtrot
             golf #Comment
             hotel
-        """.replace(
-            "\\s", " "
-        ).replace(
-            "\\t", "\t"
-        )
+        """.replace("\\s", " ").replace("\\t", "\t")
     )
     filename = tmp_path / "test.py"
     filename.write_text(source)
@@ -83,7 +79,7 @@ def test_command_line_interface(input_file: Path) -> None:
 def test_no_black_config(input_file: Path, black_config: Path) -> None:
     os.remove(str(black_config))
     output = run(["--check", "--verbose", str(input_file)], expected_exit=1)
-    output.fnmatch_lines("pyproject.toml not found or not configured for black.")
+    output.fnmatch_lines("pyproject.toml not found or not configured for neither ruff nor black.")
 
 
 def test_directory_command_line(input_file: Path, tmp_path: Path) -> None:
@@ -125,9 +121,7 @@ def test_fix_whitespace(input_file: Path) -> None:
             foxtrot
             golf #Comment
             hotel
-        """.replace(
-            "\\s", " "
-        )
+        """.replace("\\s", " ")
     )
     assert obtained == expected
 
